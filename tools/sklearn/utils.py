@@ -211,6 +211,30 @@ class SafeEval(Interpreter):
                                         no_raise=True, no_print=True)
 
 
+
+class H5Model(object):
+    """
+    Write scikit-learn models to H5 and read
+    Usage:
+        eg.: H5Model.writeToH5(model_dict, file_name)
+           : H5Model.readFromH5(file_name)
+    """
+    @classmethod
+    def writeToH5(self, model_dict, file_name):
+        """
+        Write a trained scikit-learn model to an h5 file
+        """
+        print(model_dict)
+        print(file_name)
+
+    @classmethod
+    def readFromH5(self, file_name):
+        """
+        Reconstruct a model by reading h5 file
+        """
+        print(file_name)
+
+
 def get_search_params(params_builder):
     search_params = {}
     safe_eval = SafeEval(load_scipy=True, load_numpy=True)

@@ -49,6 +49,8 @@ res.to_csv(path_or_buf = "$outfile_predict", sep="\t", index=False)
 
 #else:
 
+H5Model.writeToH5("$outfile_fit", )
+
 X, y = get_X_y(params, "$selected_tasks.selected_algorithms.input_options.infile1" ,"$selected_tasks.selected_algorithms.input_options.infile2")
 
 options = params["selected_tasks"]["selected_algorithms"]["options"]
