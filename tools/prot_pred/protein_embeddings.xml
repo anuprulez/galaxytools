@@ -1,0 +1,66 @@
+<tool id="predict_protein_embeddings" name="Predict protein sequence embeddings" version="0.0.1">
+    <description>using large protein AI models</description>
+    <requirements>
+        <requirement type="package" version="3.9.12">python</requirement>
+        <requirement type="package" version="4.26.1">transformers</requirement>
+    </requirements>
+    <version_command>echo "@VERSION@"</version_command>
+    <command detect_errors="aggressive">
+<![CDATA[
+        python '$__tool_directory__/main.py'
+
+            --fasta_file '$input_prot_seqs'
+            --output_embed '$outfile_embeddings'
+]]>
+    </command>
+    <inputs>
+        <param name="input_prot_seqs" type="data" format="fasta" label="FASTA file having protein sequences" help="Please provide protein sequences in FASTA format."/>
+    </inputs>
+    <outputs>
+        <data format="h5" name="outfile_embeddings" label="Protein embeddings"></data>
+    </outputs>
+    <tests>
+        <test>
+            <param name="input_prot_seqs" value="test_prot_seqs" ftype="fasta"/>
+            <output name="outfile_embeddings">
+                <assert_contents>
+                    <has_h5_keys keys="class_weights,compatible_tools"/>
+                </assert_contents>
+            </output>
+        </test>
+    </tests>
+    <help>
+        <![CDATA[
+**What it does**
+
+**Description**
+
+It ...
+
+-----
+
+**Input files**
+
+-----
+
+
+**Parameters**
+
+-----
+
+
+**Output file**
+
+        ]]>
+    </help>
+    <citations>
+        <citation type="bibtex">
+            @ARTICLE{anuprulez_galaxytools,
+                Author = {Anup Kumar and Björn Grüning},
+                keywords = {bioinformatics, large protein models, deep learning},
+                title = {{Large protein models}},
+                url = {https://github.com/bgruening/galaxytools}
+            }
+        </citation>
+    </citations>
+</tool>
