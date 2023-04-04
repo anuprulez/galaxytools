@@ -3,9 +3,10 @@
     <requirements>
         <requirement type="package" version="3.9.12">python</requirement>
         <requirement type="package" version="4.27.4">transformers</requirement>
-		<requirement type="package" version="1.81">biopython</requirement>
-		<requirement type="package" version="1.13.1">pytorch</requirement>
-		<requirement type="package" version="3.8.0">h5py</requirement>
+	<requirement type="package" version="1.81">biopython</requirement>
+	<requirement type="package" version="1.13.1">pytorch</requirement>
+	<requirement type="package" version="3.8.0">h5py</requirement>
+	<requirement type="package" version="0.1.97">sentencepiece</requirement>
     </requirements>
     <version_command>echo "@VERSION@"</version_command>
     <command detect_errors="aggressive">
@@ -26,7 +27,7 @@
             <param name="input_prot_seqs" value="test_prot_seqs" ftype="fasta"/>
             <output name="outfile_embeddings">
                 <assert_contents>
-                    <has_h5_keys keys="class_weights,compatible_tools"/>
+                    <has_h5_keys keys="embedding"/>
                 </assert_contents>
             </output>
         </test>

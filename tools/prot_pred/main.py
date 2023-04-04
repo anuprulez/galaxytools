@@ -3,6 +3,7 @@ Predict embedding of protein sequences using
 large protein models
 """
 
+import re
 import argparse
 import time
 
@@ -79,7 +80,7 @@ if __name__ == "__main__":
     
     print("Number of seqs: {}".format(str(len(fasta_seqs))))
 
-    #encode_seqs(fasta_seqs, out_file)
+    encode_seqs(fasta_seqs, out_file)
 
     end_time = time.time()
     print("Program finished in %s seconds" % str(end_time - start_time))
