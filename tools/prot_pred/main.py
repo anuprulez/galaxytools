@@ -13,12 +13,11 @@ import h5py
 
 
 def process_sequences(seq_file):
-    fasta_sequences = SeqIO.parse(open(input_file),'fasta')
+    fasta_sequences = SeqIO.parse(open(seq_file), 'fasta')
     seqs_fasta = list()
-    with open(output_file) as out_file:
-        for fasta in fasta_sequences:
-            name, sequence = fasta.id, str(fasta.seq)
-            seqs_fasta.append(sequence)
+    for fasta in fasta_sequences:
+        name, sequence = fasta.id, str(fasta.seq)
+        seqs_fasta.append(sequence)
     return seqs_fasta
     
 
@@ -77,8 +76,10 @@ if __name__ == "__main__":
     print(fasta_file, out_file)
 
     fasta_seqs = process_sequences(fasta_file)
+    
+    print("Number of seqs: {}".format(str(len(fasta_seqs))))
 
-    encode_seqs(fasta_seqs, out_file)
+    #encode_seqs(fasta_seqs, out_file)
 
     end_time = time.time()
     print("Program finished in %s seconds" % str(end_time - start_time))
