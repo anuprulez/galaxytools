@@ -13,11 +13,18 @@
 <![CDATA[
         python '$__tool_directory__/main.py'
             --fasta_file '$input_prot_seqs'
+            --model_type '$pretrained_model'
             --output_embed '$outfile_embeddings'
 ]]>
     </command>
     <inputs>
         <param name="input_prot_seqs" type="data" format="fasta" label="FASTA file having protein sequences" help="Please provide protein sequences in FASTA format."/>
+        <param argument="pretrained_model" type="select" label="Choose any ProtTrans model">
+            <option value="Rostlab/prot_t5_xl_uniref50" selected="@NONE@">ProtT5-XL-UniRef50</option>
+            <option value="Rostlab/prot_t5_xl_bfd">ProtT5-XL-BFD</option>
+            <option value="Rostlab/prot_t5_xxl_uniref50">ProtT5-XXL-UniRef50</option>
+            <option value="Rostlab/prot_t5_xxl_bfd">ProtT5-XXL-BFD</option>
+        </param>
     </inputs>
     <outputs>
         <data format="h5" name="outfile_embeddings" label="Protein embeddings"></data>

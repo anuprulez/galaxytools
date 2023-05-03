@@ -22,12 +22,14 @@ def process_sequences(seq_file):
     return seqs_fasta
     
 
-def encode_seqs(seqs_fasta, out_file):
+def encode_seqs(seqs_fasta, t_pre_model, out_file):
     
     print("mapping to rare amino acids...")
     sequences = [re.sub(r"[UZOJB]", "X", sequence) for sequence in seqs_fasta]
-    tokenizer = T5Tokenizer.from_pretrained('Rostlab/prot_t5_xl_uniref50', do_lower_case=False)
-    model = T5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_uniref50")
+    #tokenizer = T5Tokenizer.from_pretrained('Rostlab/prot_t5_xl_uniref50', do_lower_case=False)
+    #model = T5EncoderModel.from_pretrained("Rostlab/prot_t5_xl_uniref50")
+    tokenizer = T5Tokenizer.from_pretrained(t_pre_model, do_lower_case=False)
+    model = T5EncoderModel.from_pretrained(t_pre_model)
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     model = model.to(device)
     model = model.eval()
@@ -66,21 +68,24 @@ if __name__ == "__main__":
 
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument("-ff", "--fasta_file", required=True, help="fasta file containing protein sequences")
+    arg_parser.add_argument("-mt", "--model_type", required=True, help="type of pretrained model")
     arg_parser.add_argument("-oe", "--output_embed", required=True, help="embedding of protein sequences")
 
     # get argument values
     args = vars(arg_parser.parse_args())
     fasta_file = args["fasta_file"]
+    t_pre_model = args["model_type"]
     out_file = args["output_embed"]
     
     print(torch.__version__)
     print(fasta_file, out_file)
+    print(t_pre_model)
 
     fasta_seqs = process_sequences(fasta_file)
     
     print("Number of seqs: {}".format(str(len(fasta_seqs))))
 
-    encode_seqs(fasta_seqs, out_file)
+    encode_seqs(fasta_seqs, t_pre_model, out_file)
 
     end_time = time.time()
     print("Program finished in %s seconds" % str(end_time - start_time))
