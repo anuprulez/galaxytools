@@ -8,6 +8,8 @@ import imageio
 import numpy as np
 import torch
 import torch.nn.functional as F
+import tensorflow as tf
+import zipfile
 
 
 def dynamic_resize(image: torch.Tensor, target_shape: tuple):
@@ -38,7 +40,7 @@ def dynamic_resize(image: torch.Tensor, target_shape: tuple):
     # Add batch dim (N=1) for resizing
     image = image.unsqueeze(0)
 
-    # Choose the best interpolation mode based on dimensionality
+    
     if num_dims == 4:
         interp_mode = "trilinear"
     elif num_dims == 3:
@@ -74,6 +76,31 @@ def dynamic_resize(image: torch.Tensor, target_shape: tuple):
     return image.squeeze(0)  # Remove batch dimension before returning
 
 
+def process_tensorflow_models(input_matrix, model_path):
+    """
+    Process TensorFlow models.
+    """
+    test_image = np.load(input_matrix)
+    recreated_model = extract_and_load_tf_model(model_path)
+    inference_fn = recreated_model.signatures["serving_default"]
+    test_image = tf.convert_to_tensor(test_image, dtype=tf.float32)
+    output = inference_fn(test_image)
+    predicted_tensor = output['output']
+    np.save("output_predicted_image_matrix.npy", predicted_tensor)
+    pred_data = np.squeeze(predicted_tensor)
+    imageio.v3.imwrite("output_predicted_image.tiff", pred_data, extension=".tiff")
+
+
+def extract_and_load_tf_model(zip_path: str, extract_to: str = "unzipped_model") -> tf.keras.Model:
+    # Unzip the model
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(extract_to)
+    # Load the model from the extracted folder
+    model = tf.saved_model.load(extract_to)
+    model.trainable = False
+    return model
+
+
 if __name__ == "__main__":
     arg_parser = argparse.ArgumentParser()
     arg_parser.add_argument(
@@ -88,6 +115,9 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         "-ia", "--image_axes", required=True, help="Input image file's axes"
     )
+    arg_parser.add_argument(
+        "-mt", "--is_tfmodel", required=True, help="Input image file's axes"
+    )
 
     # get argument values
     args = vars(arg_parser.parse_args())
@@ -95,51 +125,56 @@ if __name__ == "__main__":
     input_image_path = args["image_file"]
     input_size = args["image_size"]
 
-    # load all embedded images in TIF file
-    test_data = imageio.v3.imread(input_image_path, index="...")
-    test_data = test_data.astype(np.float32)
-    test_data = np.squeeze(test_data)
+    if args["is_tfmodel"] == "true":
+        process_tensorflow_models(input_image_path, model_path)
+    else:
+        # load all embedded images in TIF file
+        test_data = imageio.v3.imread(input_image_path, index="...")
+        test_data = test_data.astype(np.float32)
+        test_data = np.squeeze(test_data)
 
-    target_image_dim = input_size.split(",")[::-1]
-    target_image_dim = [int(i) for i in target_image_dim if i != "1"]
-    target_image_dim = tuple(target_image_dim)
+        target_image_dim = input_size.split(",")[::-1]
+        target_image_dim = [int(i) for i in target_image_dim if i != "1"]
+        target_image_dim = tuple(target_image_dim)
 
-    exp_test_data = torch.tensor(test_data)
-    # check if image dimensions are reversed
-    reversed_order = list(reversed(range(exp_test_data.dim())))
-    exp_test_data_T = exp_test_data.permute(*reversed_order)
-    if exp_test_data_T.shape == target_image_dim and exp_test_data.shape != target_image_dim:
-        exp_test_data = exp_test_data_T
-    # check if image dimensions are not equal to target image dimensions
-    if exp_test_data.shape != target_image_dim:
-        for i in range(len(target_image_dim) - exp_test_data.dim()):
-            exp_test_data = exp_test_data.unsqueeze(i)
-        try:
-            exp_test_data = dynamic_resize(exp_test_data, target_image_dim)
-        except Exception as e:
-            raise RuntimeError(f"Error during resizing: {e}") from e
+        exp_test_data = torch.tensor(test_data)
+        # check if image dimensions are reversed
+        reversed_order = list(reversed(range(exp_test_data.dim())))
+        exp_test_data_T = exp_test_data.permute(*reversed_order)
+        if exp_test_data_T.shape == target_image_dim and exp_test_data.shape != target_image_dim:
+            exp_test_data = exp_test_data_T
+        # check if image dimensions are not equal to target image dimensions
+        if exp_test_data.shape != target_image_dim:
+            for i in range(len(target_image_dim) - exp_test_data.dim()):
+                exp_test_data = exp_test_data.unsqueeze(i)
+            try:
+                exp_test_data = dynamic_resize(exp_test_data, target_image_dim)
+            except Exception as e:
+                raise RuntimeError(f"Error during resizing: {e}") from e
 
-    current_dimension = len(exp_test_data.shape)
-    input_axes = args["image_axes"]
-    target_dimension = len(input_axes)
-    # expand input image based on the number of target dimensions
-    for i in range(target_dimension - current_dimension):
-        exp_test_data = torch.unsqueeze(exp_test_data, i)
+        current_dimension = len(exp_test_data.shape)
+        input_axes = args["image_axes"]
+        target_dimension = len(input_axes)
+        # expand input image based on the number of target dimensions
+        for i in range(target_dimension - current_dimension):
+            exp_test_data = torch.unsqueeze(exp_test_data, i)
 
-    # load model
-    model = torch.load(model_path)
-    model.eval()
+        print("Final test data shape: ", exp_test_data.shape)
+    
+        # load model
+        model = torch.load(model_path)
+        model.eval()
 
-    # make prediction
-    pred_data = model(exp_test_data)
-    pred_data_output = pred_data.detach().numpy()
+        # make prediction
+        pred_data = model(exp_test_data)
+        pred_data_output = pred_data.detach().numpy()
 
-    # save original image matrix
-    np.save("output_predicted_image_matrix.npy", pred_data_output)
+        # save original image matrix
+        np.save("output_predicted_image_matrix.npy", pred_data_output)
 
-    # post process predicted file to correctly save as TIF file
-    pred_data = torch.squeeze(pred_data)
-    pred_numpy = pred_data.detach().numpy()
+        # post process predicted file to correctly save as TIF file
+        pred_data = torch.squeeze(pred_data)
+        pred_numpy = pred_data.detach().numpy()
 
-    # write predicted TIF image to file
-    imageio.v3.imwrite("output_predicted_image.tiff", pred_numpy, extension=".tiff")
+        # write predicted TIF image to file
+        imageio.v3.imwrite("output_predicted_image.tiff", pred_numpy, extension=".tiff")

@@ -22,6 +22,7 @@
         <requirement type="package" version="@TOOL_VERSION@">pytorch</requirement>
         <requirement type="package" version="0.19.1">torchvision</requirement>
         <requirement type="package" version="2.35.1">imageio</requirement>
+        <requirement type="package" version="2.18.0">tensorflow</requirement>
     </requirements>
     <version_command>echo "@VERSION@"</version_command>
     <command detect_errors="aggressive">
@@ -31,11 +32,13 @@
             --image_file '$input_image_file'
             --image_size '$input_image_input_size'
             --image_axes '$input_image_input_axes'
+            --is_tfmodel '$istfmodel'
     ]]>
     </command>
     <inputs>
         <param name="input_imaging_model" type="data" format="zip" label="BioImage.IO model" help="Please upload a BioImage.IO model."/>
-        <param name="input_image_file" type="data" format="tiff,png" label="Input image" help="Please provide an input image for the analysis."/>
+        <param name="istfmodel" type="boolean" truevalue="true" falsevalue="false" checked="false" label="Pytorch or TensorFlow model?" help="Set this parameter when a model is TensorFlow based"/>
+        <param name="input_image_file" type="data" format="tiff,png,npy" label="Input image" help="Please provide an input image for the analysis."/>
         <param name="input_image_input_size" type="text" optional="false" label="Size of the input image" help="Provide the size of the input image. See the chosen model's RDF file to find the correct input size. For example: for the BioImage.IO model MitochondriaEMSegmentationBoundaryModel, the input size is 256 x 256 x 32 x 1. Enter the size as 256,256,32,1."/>
         <param name="input_image_input_axes" type="select" label="Axes of the input image" optional="false" help="Provide the input axes of the input image. See the chosen model's RDF file to find the correct axes. For example: for the BioImage.IO model MitochondriaEMSegmentationBoundaryModel, the input axes is 'bczyx'">
             <option value="bcyx">Four axes (e.g., bcyx, byxc)</option>
