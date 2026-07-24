@@ -1,323 +1,282 @@
-"""
-Tabular data prediction using TabICL
-"""
-
+"""TabICL classification, regression, fine-tuning and SHAP runner."""
 import argparse
+import json
 import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from sklearn.metrics import (
-    accuracy_score,
-    average_precision_score,
-    balanced_accuracy_score,
-    f1_score,
-    precision_recall_curve,
-    r2_score,
-    root_mean_squared_error,
-)
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.metrics import (accuracy_score, average_precision_score, balanced_accuracy_score,
+                             f1_score, precision_recall_curve, r2_score,
+                             root_mean_squared_error)
+from sklearn.model_selection import KFold, StratifiedKFold, train_test_split
 from sklearn.preprocessing import label_binarize
 
 SEED = 42
 
 
-def separate_features_labels(data, header):
-    df = pd.read_csv(data, sep="\t", header=0 if header == "true" else None)
-    labels = df.iloc[:, -1]
-    features = df.iloc[:, :-1]
-    return features, labels
+def read_table(path, header):
+    return pd.read_csv(path, sep="\t", header=0 if header == "true" else None)
 
 
-def make_estimator(selected_task, model_path):
+def split_xy(path, header):
+    data = read_table(path, header)
+    return data.iloc[:, :-1].copy(), data.iloc[:, -1].copy()
+
+
+def parse_auto_boolean(value):
+    if value == "auto":
+        return "auto"
+    return value == "true"
+
+
+def model_config(args):
+    config = {"random_state": args.random_state, "model_path": args.model_path}
+    if args.advanced_icl != "true":
+        return config
+    norm_methods = {
+        "default": None,
+        "none": ["none"],
+        "power": ["power"],
+        "none_power": ["none", "power"],
+    }[args.norm_methods]
+    config.update({
+        "n_estimators": args.n_estimators,
+        "norm_methods": norm_methods,
+        "feat_shuffle_method": args.feat_shuffle_method,
+        "outlier_threshold": args.outlier_threshold,
+        "batch_size": args.batch_size,
+        "kv_cache": args.kv_cache == "true",
+        "allow_auto_download": args.allow_auto_download == "true",
+        "device": None if args.device == "auto" else args.device,
+        "use_amp": parse_auto_boolean(args.use_amp),
+        "use_fa3": parse_auto_boolean(args.use_fa3),
+        "offload_mode": args.offload_mode,
+        "disk_offload_dir": args.disk_offload_dir or None,
+        "n_jobs": args.n_jobs or None,
+        "verbose": args.verbose == "true",
+        "inference_config": json.loads(args.inference_config) if args.inference_config else None,
+    })
+    if args.checkpoint_version:
+        config["checkpoint_version"] = args.checkpoint_version
+    if args.selected_task == "Classification":
+        config.update({
+            "class_shuffle_method": args.class_shuffle_method,
+            "softmax_temperature": args.softmax_temperature,
+            "average_logits": args.average_logits == "true",
+            "support_many_classes": args.support_many_classes == "true",
+        })
+    return config
+
+
+def make_estimator(args):
+    if args.fine_tune == "true":
+        from tabicl import FinetunedTabICLClassifier, FinetunedTabICLRegressor
+        cls = FinetunedTabICLClassifier if args.selected_task == "Classification" else FinetunedTabICLRegressor
+        return cls(model_path=args.model_path, epochs=args.epochs, learning_rate=args.learning_rate,
+                   n_estimators_finetune=args.n_estimators_finetune,
+                   n_estimators_validation=args.n_estimators_validation,
+                   n_estimators_inference=args.n_estimators_inference,
+                   early_stopping=args.early_stopping == "true", patience=args.patience,
+                   eval_metric=(args.eval_metric if (args.selected_task == "Classification" and args.eval_metric in {"accuracy", "roc_auc", "log_loss"}) or (args.selected_task == "Regression" and args.eval_metric in {"mse", "mae", "r2"}) else ("accuracy" if args.selected_task == "Classification" else "r2")), random_state=SEED, verbose=True)
     from tabicl import TabICLClassifier, TabICLRegressor
-    estimator_class = (
-        TabICLClassifier if selected_task == "Classification" else TabICLRegressor
-    )
-    kwargs = {
-        "random_state": SEED,
-        "model_path": model_path,
-    }
-    return estimator_class(**kwargs)
+    cls = TabICLClassifier if args.selected_task == "Classification" else TabICLRegressor
+    return cls(**model_config(args))
 
 
-def classification_plot(y_true, y_scores):
+def fit(estimator, features, labels, args):
+    if args.fine_tune != "true":
+        estimator.fit(features, labels)
+        return
+    stratify = labels if args.selected_task == "Classification" else None
+    x_train, x_val, y_train, y_val = train_test_split(
+        features, labels, test_size=args.validation_fraction, random_state=args.random_state, stratify=stratify)
+    estimator.fit(x_train, y_train, X_val=x_val, y_val=y_val, output_dir="finetuned_model")
+
+
+def prediction_plot(y_true, y_pred, task, y_scores=None):
     plt.figure(figsize=(8, 6))
-    is_binary = len(np.unique(y_true)) == 2
-    if is_binary:
-        # Compute precision-recall curve
-        precision, recall, _ = precision_recall_curve(y_true, y_scores[:, 1])
-        average_precision = average_precision_score(y_true, y_scores[:, 1])
-        plt.plot(
-            recall,
-            precision,
-            label=f"Precision-Recall Curve (AP={average_precision:.2f})",
-        )
-        plt.title("Precision-Recall Curve (binary classification)")
-    else:
-        y_true_bin = label_binarize(y_true, classes=np.unique(y_true))
-        n_classes = y_true_bin.shape[1]
-        class_labels = [f"Class {i}" for i in range(n_classes)]
-        # Plot PR curve for each class
-        for i in range(n_classes):
+    if task == "Classification":
+        classes = np.unique(y_true)
+        if y_scores is None:
+            raise ValueError("Classification plotting requires prediction probabilities.")
+        if len(classes) == 2:
+            y_binary = label_binarize(y_true, classes=classes).ravel()
+            precision, recall, _ = precision_recall_curve(y_binary, y_scores[:, 1])
+            average_precision = average_precision_score(y_binary, y_scores[:, 1])
+            plt.plot(recall, precision, label=f"Precision-recall (AP={average_precision:.2f})")
+            plt.title("Precision-recall curve (binary classification)")
+        else:
+            y_binarized = label_binarize(y_true, classes=classes)
+            for index, class_name in enumerate(classes):
+                precision, recall, _ = precision_recall_curve(
+                    y_binarized[:, index], y_scores[:, index])
+                average_precision = average_precision_score(
+                    y_binarized[:, index], y_scores[:, index])
+                plt.plot(recall, precision,
+                         label=f"{class_name} (AP={average_precision:.2f})")
             precision, recall, _ = precision_recall_curve(
-                y_true_bin[:, i], y_scores[:, i]
-            )
-            ap_score = average_precision_score(y_true_bin[:, i], y_scores[:, i])
-            plt.plot(
-                recall, precision, label=f"{class_labels[i]} (AP = {ap_score:.2f})"
-            )
-        # Compute micro-average PR curve
-        precision, recall, _ = precision_recall_curve(
-            y_true_bin.ravel(), y_scores.ravel()
-        )
-        plt.plot(
-            recall, precision, linestyle="--", color="black", label="Micro-average"
-        )
-        plt.title("Precision-Recall Curve (Multiclass Classification)")
-    plt.xlabel("Recall")
-    plt.ylabel("Precision")
-    plt.legend(loc="lower left")
-    plt.grid(True)
-    plt.savefig("output_plot.png")
-
-
-def regression_plot(xval, yval, title, xlabel, ylabel):
-    plt.figure(figsize=(8, 6))
-    plt.xlabel(xlabel)
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.legend(loc="lower left")
-    plt.grid(True)
-    plt.scatter(xval, yval, alpha=0.8)
-    xticks = np.arange(len(xval))
-    plt.plot(xticks, xticks, color="red", linestyle="--", label="y = x")
-    plt.savefig("output_plot.png")
-
-
-def train_evaluate(args):
-    """
-    Train TabICL and predict
-    """
-    # prepare train data
-    tr_features, tr_labels = separate_features_labels(
-        args["train_data"], args["train_header"]
-    )
-    # prepare test data
-    if args["testhaslabels"] == "true":
-        te_features, te_labels = separate_features_labels(
-            args["test_data"], args["test_header"]
-        )
+                y_binarized.ravel(), y_scores.ravel())
+            plt.plot(recall, precision, "--", color="black", label="Micro-average")
+            plt.title("Precision-recall curve (multiclass classification)")
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
+        plt.legend(loc="lower left")
     else:
-        te_features = pd.read_csv(
-            args["test_data"],
-            sep="\t",
-            header=0 if args["test_header"] == "true" else None,
-        )
-        te_labels = []
-    s_time = time.time()
-    if args["selected_task"] == "Classification":
-        classifier = make_estimator(
-            args["selected_task"], args["model_path"]
-        )
-        classifier.fit(tr_features, tr_labels)
-        y_eval = classifier.predict(te_features)
-        pred_probas_test = classifier.predict_proba(te_features)
-        if len(te_labels) > 0:
-            classification_plot(te_labels, pred_probas_test)
-        te_features["predicted_labels"] = y_eval
-        te_features.to_csv("output_predicted_data", sep="\t", index=None)
+        rmse, r2 = root_mean_squared_error(y_true, y_pred), r2_score(y_true, y_pred)
+        plt.scatter(y_true, y_pred, alpha=.8)
+        low, high = min(np.min(y_true), np.min(y_pred)), max(np.max(y_true), np.max(y_pred))
+        plt.plot([low, high], [low, high], "r--", label="y = x")
+        plt.xlabel("True values")
+        plt.ylabel("Predicted values")
+        plt.title(f"True vs predicted (RMSE={rmse:.2f}, R2={r2:.2f})")
+        plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig("output_plot.png")
+    plt.close()
+
+
+def make_shap_plot(estimator, features, limit):
+    from tabicl.shap import get_shap_explainer, plot_shap
+    explain_data = features.iloc[:limit]
+    explain_array = np.asarray(explain_data, dtype=np.float64)
+    predict_method = "predict_proba" if hasattr(estimator, "predict_proba") else "predict"
+    explainer = get_shap_explainer(
+        estimator, explain_array, predict_fn=predict_method)
+    # Permutation SHAP requires at least two evaluations per feature plus one.
+    values = explainer(
+        explain_array, max_evals=2 * explain_array.shape[1] + 1)
+    if hasattr(values, "feature_names"):
+        values.feature_names = [str(column) for column in features.columns]
+    plot_shap(values, kind="beeswarm")
+    plt.tight_layout()
+    plt.savefig("shap_plot.png", bbox_inches="tight")
+    plt.close()
+
+
+def train_test(args):
+    x_train, y_train = split_xy(args.train_data, args.train_header)
+    if args.testhaslabels == "true":
+        x_test, y_test = split_xy(args.test_data, args.test_header)
     else:
-        regressor = make_estimator(
-            args["selected_task"], args["model_path"]
-        )
-        regressor.fit(tr_features, tr_labels)
-        y_eval = regressor.predict(te_features)
-        if len(te_labels) > 0:
-            score = root_mean_squared_error(te_labels, y_eval)
-            r2_metric_score = r2_score(te_labels, y_eval)
-            regression_plot(
-                te_labels,
-                y_eval,
-                f"Scatter plot: True vs predicted values. RMSE={score:.2f}, R2={r2_metric_score:.2f}",
-                "True values",
-                "Predicted values",
-            )
-    te_features["predicted_labels"] = y_eval
-    te_features.to_csv("output_predicted_data", sep="\t", index=None)
-    e_time = time.time()
-    print(
-        f"Time taken by TabICL for training and prediction: {e_time - s_time} seconds"
-    )
-
-
-def append_summary_rows(metrics_df, metric_columns):
-    summary_rows = []
-    for summary_name, summary_function in (("mean", "mean"), ("std", "std")):
-        row = {"fold": summary_name}
-        for metric_column in metric_columns:
-            row[metric_column] = getattr(metrics_df[metric_column], summary_function)()
-        summary_rows.append(row)
-    return pd.concat([metrics_df, pd.DataFrame(summary_rows)], ignore_index=True)
+        x_test, y_test = read_table(args.test_data, args.test_header), None
+    estimator = make_estimator(args)
+    fit(estimator, x_train, y_train, args)
+    predicted = estimator.predict(x_test)
+    if y_test is not None:
+        scores = estimator.predict_proba(x_test) if args.selected_task == "Classification" else None
+        prediction_plot(y_test, predicted, args.selected_task, scores)
+    if args.shap == "true":
+        make_shap_plot(estimator, x_test, args.shap_max_samples)
+    output = x_test.copy()
+    if y_test is not None:
+        output["true_labels"] = y_test.to_numpy()
+    output["predicted_labels"] = predicted
+    output.to_csv("output_predicted_data", sep="\t", index=False)
 
 
 def cross_validate(args):
-    """
-    Evaluate TabICL via cross-validation and export predictions and metrics.
-    """
-    n_splits = int(args["n_splits"])
-    cv_strategy = args["cv_strategy"]
-    features, labels = separate_features_labels(
-        args["train_data"], args["train_header"]
-    )
+    if args.fine_tune == "true":
+        raise ValueError("Fine-tuning is available with train/test evaluation only.")
+    features, labels = split_xy(args.train_data, args.train_header)
+    if args.selected_task == "Classification" and args.cv_strategy == "stratified":
+        too_small = labels.value_counts()[lambda counts: counts < args.n_splits]
+        if not too_small.empty:
+            raise ValueError("Cannot run stratified cross validation: each class must contain at "
+                             f"least {args.n_splits} samples. Classes below that limit: "
+                             + ", ".join(map(str, too_small.index)))
+        splits = StratifiedKFold(args.n_splits, shuffle=True, random_state=args.random_state).split(features, labels)
+    else:
+        if args.selected_task == "Regression" and args.cv_strategy == "stratified":
+            raise ValueError("Stratified cross validation is only available for classification.")
+        splits = KFold(args.n_splits, shuffle=True, random_state=args.random_state).split(features)
     predictions = pd.Series(index=features.index, dtype=object)
     fold_numbers = pd.Series(index=features.index, dtype="Int64")
     metrics = []
-    s_time = time.time()
-
-    if args["selected_task"] == "Classification":
-        if cv_strategy == "stratified":
-            class_counts = labels.value_counts()
-            too_small_classes = class_counts[class_counts < n_splits]
-            if not too_small_classes.empty:
-                too_small_class_names = ", ".join(
-                    str(name) for name in too_small_classes.index
-                )
-                raise ValueError(
-                    "Cannot run stratified cross validation: each class must contain at "
-                    f"least {n_splits} samples. Classes below that limit: "
-                    f"{too_small_class_names}"
-                )
-            splitter = StratifiedKFold(
-                n_splits=n_splits, shuffle=True, random_state=SEED
-            )
-            split_iterator = splitter.split(features, labels)
+    for fold_number, (train_index, test_index) in enumerate(splits, 1):
+        estimator = make_estimator(args)
+        estimator.fit(features.iloc[train_index], labels.iloc[train_index])
+        predicted = estimator.predict(features.iloc[test_index])
+        predictions.iloc[test_index], fold_numbers.iloc[test_index] = predicted, fold_number
+        if args.selected_task == "Classification":
+            metrics.append({"fold": fold_number,
+                            "accuracy": accuracy_score(labels.iloc[test_index], predicted),
+                            "balanced_accuracy": balanced_accuracy_score(labels.iloc[test_index], predicted),
+                            "f1_weighted": f1_score(labels.iloc[test_index], predicted, average="weighted", zero_division=0)})
+            metric_columns = ["accuracy", "balanced_accuracy", "f1_weighted"]
         else:
-            splitter = KFold(n_splits=n_splits, shuffle=True, random_state=SEED)
-            split_iterator = splitter.split(features)
-        for fold_index, (train_index, test_index) in enumerate(split_iterator, start=1):
-            estimator = make_estimator(
-                args["selected_task"], args["model_path"]
-            )
-            estimator.fit(features.iloc[train_index], labels.iloc[train_index])
-            fold_predictions = estimator.predict(features.iloc[test_index])
-            predictions.iloc[test_index] = fold_predictions
-            fold_numbers.iloc[test_index] = fold_index
-            metrics.append(
-                {
-                    "fold": fold_index,
-                    "accuracy": accuracy_score(
-                        labels.iloc[test_index], fold_predictions
-                    ),
-                    "balanced_accuracy": balanced_accuracy_score(
-                        labels.iloc[test_index], fold_predictions
-                    ),
-                    "f1_weighted": f1_score(
-                        labels.iloc[test_index],
-                        fold_predictions,
-                        average="weighted",
-                        zero_division=0,
-                    ),
-                }
-            )
-        metric_columns = ["accuracy", "balanced_accuracy", "f1_weighted"]
-    else:
-        if cv_strategy == "stratified":
-            raise ValueError(
-                "Stratified cross validation is only available for classification. "
-                "Use kfold cross validation for regression."
-            )
-        splitter = KFold(n_splits=n_splits, shuffle=True, random_state=SEED)
-        for fold_index, (train_index, test_index) in enumerate(
-            splitter.split(features), start=1
-        ):
-            estimator = make_estimator(
-                args["selected_task"], args["model_path"]
-            )
-            estimator.fit(features.iloc[train_index], labels.iloc[train_index])
-            fold_predictions = estimator.predict(features.iloc[test_index])
-            predictions.iloc[test_index] = fold_predictions
-            fold_numbers.iloc[test_index] = fold_index
-            metrics.append(
-                {
-                    "fold": fold_index,
-                    "rmse": root_mean_squared_error(
-                        labels.iloc[test_index], fold_predictions
-                    ),
-                    "r2": r2_score(labels.iloc[test_index], fold_predictions),
-                }
-            )
-        metric_columns = ["rmse", "r2"]
-
-    output_data = features.copy()
-    output_data["true_labels"] = labels
-    output_data["fold"] = fold_numbers
-    output_data["predicted_labels"] = predictions
-    output_data.to_csv("output_predicted_data", sep="\t", index=None)
-
+            metrics.append({"fold": fold_number,
+                            "rmse": root_mean_squared_error(labels.iloc[test_index], predicted),
+                            "r2": r2_score(labels.iloc[test_index], predicted)})
+            metric_columns = ["rmse", "r2"]
+    output = features.copy()
+    output["true_labels"], output["fold"], output["predicted_labels"] = labels, fold_numbers, predictions
+    output.to_csv("output_predicted_data", sep="\t", index=False)
     metrics_df = pd.DataFrame(metrics)
-    metrics_df = append_summary_rows(metrics_df, metric_columns)
-    metrics_df.to_csv("cv_metrics.tsv", sep="\t", index=None)
+    summary = [{"fold": name, **{column: getattr(metrics_df[column], name)() for column in metric_columns}}
+               for name in ("mean", "std")]
+    pd.concat([metrics_df, pd.DataFrame(summary)], ignore_index=True).to_csv("cv_metrics.tsv", sep="\t", index=False)
 
-    e_time = time.time()
-    print(f"Time taken by TabICL for cross validation: {e_time - s_time} seconds")
+
+def make_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--selected_task", required=True)
+    parser.add_argument("--evaluation_method", default="train_test")
+    parser.add_argument("--train_data", required=True)
+    parser.add_argument("--train_header", required=True)
+    parser.add_argument("--test_data")
+    parser.add_argument("--test_header")
+    parser.add_argument("--testhaslabels", default="false")
+    parser.add_argument("--model_path", required=True)
+    parser.add_argument("--advanced_icl", default="false")
+    parser.add_argument("--n_estimators", type=int, default=8)
+    parser.add_argument("--norm_methods", choices=["default", "none", "power", "none_power"], default="default")
+    parser.add_argument("--feat_shuffle_method", default="latin")
+    parser.add_argument("--class_shuffle_method", default="shift")
+    parser.add_argument("--outlier_threshold", type=float, default=4.0)
+    parser.add_argument("--softmax_temperature", type=float, default=0.9)
+    parser.add_argument("--average_logits", default="true")
+    parser.add_argument("--support_many_classes", default="true")
+    parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--kv_cache", default="false")
+    parser.add_argument("--allow_auto_download", default="true")
+    parser.add_argument("--checkpoint_version", default="")
+    parser.add_argument("--device", default="auto")
+    parser.add_argument("--use_amp", choices=["auto", "true", "false"], default="auto")
+    parser.add_argument("--use_fa3", choices=["auto", "true", "false"], default="auto")
+    parser.add_argument("--offload_mode", default="auto")
+    parser.add_argument("--disk_offload_dir", default="")
+    parser.add_argument("--random_state", type=int, default=SEED)
+    parser.add_argument("--n_jobs", type=int, default=0)
+    parser.add_argument("--verbose", default="false")
+    parser.add_argument("--inference_config", default="")
+    parser.add_argument("--n_splits", type=int, default=5)
+    parser.add_argument("--cv_strategy", default="stratified")
+    parser.add_argument("--fine_tune", default="false")
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--learning_rate", type=float, default=1e-5)
+    parser.add_argument("--n_estimators_finetune", type=int, default=2)
+    parser.add_argument("--n_estimators_validation", type=int, default=2)
+    parser.add_argument("--n_estimators_inference", type=int, default=8)
+    parser.add_argument("--early_stopping", default="true")
+    parser.add_argument("--patience", type=int, default=10)
+    parser.add_argument("--eval_metric", default="accuracy")
+    parser.add_argument("--validation_fraction", type=float, default=.2)
+    parser.add_argument("--shap", default="false")
+    parser.add_argument("--shap_max_samples", type=int, default=10)
+    return parser
+
+
+def main():
+    args = make_parser().parse_args()
+    start = time.time()
+    if args.evaluation_method == "cross_validation":
+        cross_validate(args)
+    else:
+        train_test(args)
+    print(f"Time taken: {time.time() - start:.2f} seconds")
 
 
 if __name__ == "__main__":
-    arg_parser = argparse.ArgumentParser()
-    arg_parser.add_argument(
-        "-evalmethod",
-        "--evaluation_method",
-        required=True,
-        choices=["train_test", "cross_validation"],
-        help="Evaluation method",
-    )
-    arg_parser.add_argument("-trdata", "--train_data", required=True, help="Train data")
-    arg_parser.add_argument("-tedata", "--test_data", help="Test data")
-    arg_parser.add_argument(
-        "-train_header",
-        "--train_header",
-        required=True,
-        help="if train data contain header",
-    )
-    arg_parser.add_argument(
-        "-test_header", "--test_header", help="if test data contain header"
-    )
-    arg_parser.add_argument(
-        "-testhaslabels",
-        "--testhaslabels",
-        help="if test data contain labels",
-    )
-    arg_parser.add_argument(
-        "-nsplits",
-        "--n_splits",
-        type=int,
-        default=5,
-        help="Number of cross-validation folds",
-    )
-    arg_parser.add_argument(
-        "-cvstrategy",
-        "--cv_strategy",
-        choices=["kfold", "stratified"],
-        default="stratified",
-        help="Cross-validation splitting strategy",
-    )
-    arg_parser.add_argument(
-        "-selectedtask",
-        "--selected_task",
-        required=True,
-        help="Type of machine learning task",
-    )
-    arg_parser.add_argument(
-        "-modelpath",
-        "--model_path",
-        required=True,
-        help="Pretrained model to use",
-    )
-    # get argument values
-    args = vars(arg_parser.parse_args())
-    if args["evaluation_method"] == "cross_validation":
-        cross_validate(args)
-    else:
-        train_evaluate(args)
+    main()
