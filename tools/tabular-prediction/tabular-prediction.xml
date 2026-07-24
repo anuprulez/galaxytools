@@ -34,9 +34,6 @@
         ]]>
     </command>
     <inputs>
-        <param name="non_commercial_use" type="boolean" truevalue="NON_COMMERCIAL_USE" falsevalue="COMMERCIAL_USE" checked="False" label="I certify that I am not using this tool for commercial purposes."  help="Set this parameter only for non-commercial purposes, and please reach out to sales@priorlabs.ai for commercial use. Please read the license agreement: https://huggingface.co/Prior-Labs/tabpfn_2_5/blob/main/LICENSE.">
-            <validator type="expression" message="This tool is only available for non-commercial use.">value == True</validator>
-        </param>
         <param name="selected_task" type="select" label="Select a machine learning task">
             <option value="Classification" selected="true"/>
             <option value="Regression" selected="false"/>
@@ -50,7 +47,7 @@
                 <options from_data_table="huggingface">
                     <column name="name" index="1" />
                     <column name="value" index="6" />
-                    <filter type="static_value" value="tabpfn" column="4" />
+                    <filter type="static_value" value="tabicl" column="4" />
                     <filter type="static_value" value="1" column="5" />
                 </options>
                 <validator type="no_options"
@@ -306,7 +303,7 @@
         <![CDATA[
             **What it does**
 
-            Classification and Regression  on tabular data by TabPFN. The use of GPU is recommended while training TabPFN to optimize runtime. Currently, TabPFN supports upto 10,000 samples (rows) and 500 features (columns) in a tabular data.
+            Classification and Regression  on tabular data by TabICL. The use of GPU is recommended while training TabICL to optimize runtime. Currently, TabICL supports upto 10,000 samples (rows) and 500 features (columns) in a tabular data.
 
             **Input files**
                 - Train/test datasets: the training data should contain features and the last column should be the class labels. Test data should contain the same features as the training data and may contain labels in the last column.
@@ -319,8 +316,8 @@
                 - Cross-validation metrics table (when cross-validation mode is selected).
 
             **License**
-                - TabPFN software is available under Apache 2.0 with ADDITIONAL PROVISION (https://github.com/PriorLabs/TabPFN?tab=License-1-ov-file). It requires you to prominently display "Built with TabPFN" when you use a pipeline including it in production.
-                - TabPFN v2_5 models are available under a non-commercial license (https://huggingface.co/Prior-Labs/tabpfn_2_5/blob/main/LICENSE) and can only be used for non-commercial purposes. Please reach out to sales@priorlabs.ai for commercial use.
+                - TabICL software is available under BSD 3-Clause License (https://github.com/soda-inria/tabicl?tab=License-1-ov-file).
+                - TabICL v2 models are available under BSD 3-Clause License
 
         ]]>
     </help>
