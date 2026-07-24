@@ -32,7 +32,48 @@
                     <option value="false" selected="true">In-context learning</option>
                     <option value="true">Fine-tune checkpoint</option>
                 </param>
-                <when value="false"/>
+                <when value="false">
+    <conditional name="inference">
+                    <param name="advanced_icl" type="boolean" truevalue="true" falsevalue="false" checked="false" label="Advanced in-context learning parameters"/>
+                    <when value="false"/>
+                    <when value="true">
+                        <param name="n_estimators" type="integer" value="8" min="1" label="Ensemble members" help="More members can improve predictions but increase runtime."/>
+                        <param name="norm_methods" type="select" label="Normalization methods">
+                            <option value="default" selected="true">TabICL defaults</option>
+                            <option value="none">None only</option>
+                            <option value="power">Power transform only</option>
+                            <option value="none_power">None and power transform</option>
+                        </param>
+                        <param name="feat_shuffle_method" type="text" value="latin" label="Feature shuffle method"/>
+                        <param name="class_shuffle_method" type="text" value="shift" label="Class shuffle method" help="Classification only."/>
+                        <param name="outlier_threshold" type="float" value="4.0" min="0" label="Outlier clipping z-score threshold"/>
+                        <param name="softmax_temperature" type="float" value="0.9" min="0" label="Softmax temperature" help="Classification only."/>
+                        <param name="average_logits" type="boolean" truevalue="true" falsevalue="false" checked="true" label="Average logits" help="Classification only; otherwise probabilities are averaged."/>
+                        <param name="support_many_classes" type="boolean" truevalue="true" falsevalue="false" checked="true" label="Support more than 10 classes" help="Classification only."/>
+                        <param name="batch_size" type="integer" value="8" min="1" label="Ensemble batch size"/>
+                        <param name="kv_cache" type="boolean" truevalue="true" falsevalue="false" checked="false" label="Use KV cache" help="Speeds repeated predictions at the cost of memory."/>
+                        <param name="allow_auto_download" type="boolean" truevalue="true" falsevalue="false" checked="true" label="Allow automatic checkpoint download"/>
+                        <param name="checkpoint_version" type="text" value="" optional="true" label="Checkpoint version" help="Leave empty when using the selected installed model."/>
+                        <param name="device" type="text" value="auto" label="Device" help="auto, cpu, cuda, cuda:0, or mps."/>
+                        <param name="use_amp" type="select" label="Automatic mixed precision">
+                            <option value="auto" selected="true">Auto</option>
+                            <option value="true">Enabled</option>
+                            <option value="false">Disabled</option>
+                        </param>
+                        <param name="use_fa3" type="select" label="Flash Attention 3">
+                            <option value="auto" selected="true">Auto</option>
+                            <option value="true">Enabled</option>
+                            <option value="false">Disabled</option>
+                        </param>
+                        <param name="offload_mode" type="text" value="auto" label="Offload mode"/>
+                        <param name="disk_offload_dir" type="text" value="" optional="true" label="Disk offload directory"/>
+                        <param name="random_state" type="integer" value="42" label="Random seed"/>
+                        <param name="n_jobs" type="integer" value="0" min="0" label="CPU threads" help="0 lets TabICL choose."/>
+                        <param name="verbose" type="boolean" truevalue="true" falsevalue="false" checked="false" label="Verbose inference logging"/>
+                        <param name="inference_config" type="text" value="" optional="true" label="Fine-grained inference configuration (JSON)"/>
+                    </when>
+                </conditional>
+                </when>
                 <when value="true">
                     <param name="epochs" type="integer" value="50" min="1" label="Maximum epochs"/>
                     <param name="learning_rate" type="float" value="0.00001" min="0" label="Learning rate"/>
@@ -50,46 +91,6 @@
                         <option value="mae">MAE (regression)</option>
                         <option value="r2">R2 (regression)</option>
                     </param>
-                </when>
-            </conditional>
-            <conditional name="inference">
-                <param name="advanced_icl" type="boolean" truevalue="true" falsevalue="false" checked="false" label="Advanced in-context learning parameters"/>
-                <when value="false"/>
-                <when value="true">
-                    <param name="n_estimators" type="integer" value="8" min="1" label="Ensemble members" help="More members can improve predictions but increase runtime."/>
-                    <param name="norm_methods" type="select" label="Normalization methods">
-                        <option value="default" selected="true">TabICL defaults</option>
-                        <option value="none">None only</option>
-                        <option value="power">Power transform only</option>
-                        <option value="none_power">None and power transform</option>
-                    </param>
-                    <param name="feat_shuffle_method" type="text" value="latin" label="Feature shuffle method"/>
-                    <param name="class_shuffle_method" type="text" value="shift" label="Class shuffle method" help="Classification only."/>
-                    <param name="outlier_threshold" type="float" value="4.0" min="0" label="Outlier clipping z-score threshold"/>
-                    <param name="softmax_temperature" type="float" value="0.9" min="0" label="Softmax temperature" help="Classification only."/>
-                    <param name="average_logits" type="boolean" truevalue="true" falsevalue="false" checked="true" label="Average logits" help="Classification only; otherwise probabilities are averaged."/>
-                    <param name="support_many_classes" type="boolean" truevalue="true" falsevalue="false" checked="true" label="Support more than 10 classes" help="Classification only."/>
-                    <param name="batch_size" type="integer" value="8" min="1" label="Ensemble batch size"/>
-                    <param name="kv_cache" type="boolean" truevalue="true" falsevalue="false" checked="false" label="Use KV cache" help="Speeds repeated predictions at the cost of memory."/>
-                    <param name="allow_auto_download" type="boolean" truevalue="true" falsevalue="false" checked="true" label="Allow automatic checkpoint download"/>
-                    <param name="checkpoint_version" type="text" value="" optional="true" label="Checkpoint version" help="Leave empty when using the selected installed model."/>
-                    <param name="device" type="text" value="auto" label="Device" help="auto, cpu, cuda, cuda:0, or mps."/>
-                    <param name="use_amp" type="select" label="Automatic mixed precision">
-                        <option value="auto" selected="true">Auto</option>
-                        <option value="true">Enabled</option>
-                        <option value="false">Disabled</option>
-                    </param>
-                    <param name="use_fa3" type="select" label="Flash Attention 3">
-                        <option value="auto" selected="true">Auto</option>
-                        <option value="true">Enabled</option>
-                        <option value="false">Disabled</option>
-                    </param>
-                    <param name="offload_mode" type="text" value="auto" label="Offload mode"/>
-                    <param name="disk_offload_dir" type="text" value="" optional="true" label="Disk offload directory"/>
-                    <param name="random_state" type="integer" value="42" label="Random seed"/>
-                    <param name="n_jobs" type="integer" value="0" min="0" label="CPU threads" help="0 lets TabICL choose."/>
-                    <param name="verbose" type="boolean" truevalue="true" falsevalue="false" checked="false" label="Verbose inference logging"/>
-                    <param name="inference_config" type="text" value="" optional="true" label="Fine-grained inference configuration (JSON)"/>
                 </when>
             </conditional>
             <conditional name="explain">
@@ -127,30 +128,32 @@
                     --cv_strategy '$task.evaluation.cv_strategy'
                 #end if
                 --fine_tune '$task.learning.fine_tune'
-    --advanced_icl '$task.inference.advanced_icl'
-    #if str($task.inference.advanced_icl) == 'true'
-        --n_estimators '$task.inference.n_estimators'
-        --norm_methods '$task.inference.norm_methods'
-        --feat_shuffle_method '$task.inference.feat_shuffle_method'
-        --class_shuffle_method '$task.inference.class_shuffle_method'
-        --outlier_threshold '$task.inference.outlier_threshold'
-        --softmax_temperature '$task.inference.softmax_temperature'
-        --average_logits '$task.inference.average_logits'
-        --support_many_classes '$task.inference.support_many_classes'
-        --batch_size '$task.inference.batch_size'
-        --kv_cache '$task.inference.kv_cache'
-        --allow_auto_download '$task.inference.allow_auto_download'
-        --checkpoint_version '$task.inference.checkpoint_version'
-        --device '$task.inference.device'
-        --use_amp '$task.inference.use_amp'
-        --use_fa3 '$task.inference.use_fa3'
-        --offload_mode '$task.inference.offload_mode'
-        --disk_offload_dir '$task.inference.disk_offload_dir'
-        --random_state '$task.inference.random_state'
-        --n_jobs '$task.inference.n_jobs'
-        --verbose '$task.inference.verbose'
-        --inference_config '$task.inference.inference_config'
-    #end if
+                #if str($task.learning.fine_tune) == 'false'
+                    --advanced_icl '$task.learning.inference.advanced_icl'
+                    #if str($task.learning.inference.advanced_icl) == 'true'
+                        --n_estimators '$task.learning.inference.n_estimators'
+                        --norm_methods '$task.learning.inference.norm_methods'
+                        --feat_shuffle_method '$task.learning.inference.feat_shuffle_method'
+                        --class_shuffle_method '$task.learning.inference.class_shuffle_method'
+                        --outlier_threshold '$task.learning.inference.outlier_threshold'
+                        --softmax_temperature '$task.learning.inference.softmax_temperature'
+                        --average_logits '$task.learning.inference.average_logits'
+                        --support_many_classes '$task.learning.inference.support_many_classes'
+                        --batch_size '$task.learning.inference.batch_size'
+                        --kv_cache '$task.learning.inference.kv_cache'
+                        --allow_auto_download '$task.learning.inference.allow_auto_download'
+                        --checkpoint_version '$task.learning.inference.checkpoint_version'
+                        --device '$task.learning.inference.device'
+                        --use_amp '$task.learning.inference.use_amp'
+                        --use_fa3 '$task.learning.inference.use_fa3'
+                        --offload_mode '$task.learning.inference.offload_mode'
+                        --disk_offload_dir '$task.learning.inference.disk_offload_dir'
+                        --random_state '$task.learning.inference.random_state'
+                        --n_jobs '$task.learning.inference.n_jobs'
+                        --verbose '$task.learning.inference.verbose'
+                        --inference_config '$task.learning.inference.inference_config'
+                    #end if
+                #end if
                 #if str($task.learning.fine_tune) == 'true'
                     --epochs '$task.learning.epochs'
                     --learning_rate '$task.learning.learning_rate'
