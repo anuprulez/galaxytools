@@ -1,0 +1,200 @@
+<tool id="imagej2_diameterj" name="DiameterJ fiber diameter" version="@TOOL_VERSION@+galaxy@VERSION_SUFFIX@" profile="23.0">
+    <description>measure fiber diameters from a segmented image</description>
+    <macros>
+        <import>imagej2_macros.xml</import>
+    </macros>
+    <edam_operations>
+        <edam_operation>operation_3443</edam_operation>
+    </edam_operations>
+    <xrefs>
+        <xref type="biii">diameterj</xref>
+    </xrefs>
+    <expand macro="fiji_requirements"/>
+    <command detect_errors="exit_code"><![CDATA[
+#import os
+#set input_sans_ext = $os.path.splitext($os.path.basename($input.file_name))[0]
+#set input_with_ext = './' + '.'.join([input_sans_ext, $input.ext])
+ln -s '$input.file_name' '$input_with_ext' &&
+ImageJ --ij2 --headless --debug
+--jython '$__tool_directory__/imagej2_diameterj_jython_script.py'
+'$input_with_ext'
+'$foreground'
+'$scale.pixel_size'
+'$scale.unit'
+'$bin_width'
+'$orientation_bin_width'
+'$orientation_radius'
+'$mesh_bin_width'
+'$summary'
+'$histogram'
+'$histogram_plot'
+'$mesh_holes'
+'$mesh_plot'
+'$orientation'
+'$orientation_plot'
+'$intersections'
+'$diagnostic'
+'$distance_map'
+'$skeleton'
+'$voronoi'
+    ]]></command>
+    <inputs>
+        <expand macro="param_input"/>
+        <param name="foreground" type="select" label="Fiber foreground color" help="DiameterJ requires a segmented binary image. Select the color representing fibers.">
+            <option value="white" selected="true">White (black background)</option>
+            <option value="black">Black (white background)</option>
+        </param>
+        <conditional name="scale">
+            <param name="mode" type="select" label="Diameter units">
+                <option value="pixels" selected="true">Pixels</option>
+                <option value="calibrated">Calibrated physical units</option>
+            </param>
+            <when value="pixels">
+                <param name="pixel_size" type="hidden" value="1.0"/>
+                <param name="unit" type="hidden" value="pixel"/>
+            </when>
+            <when value="calibrated">
+                <param name="pixel_size" type="float" value="1.0" min="1e-12" label="Physical size of one pixel"/>
+                <param name="unit" type="text" value="um" label="Physical unit">
+                    <sanitizer invalid_char="_">
+                        <valid initial="string.letters,string.digits">
+                            <add value="µ"/>
+                            <add value="μ"/>
+                        </valid>
+                    </sanitizer>
+                </param>
+            </when>
+        </conditional>
+        <param name="bin_width" type="float" value="1.0" min="1e-12" label="Histogram bin width (pixels)"/>
+        <param name="orientation_bin_width" type="float" value="5.0" min="1" max="90" label="Orientation histogram bin width (degrees)"/>
+        <param name="orientation_radius" type="integer" value="5" min="2" max="50" label="Orientation neighborhood radius (pixels)" help="Local fiber direction is estimated by principal-component analysis of skeleton pixels in this radius."/>
+        <param name="mesh_bin_width" type="float" value="100.0" min="1e-12" label="Mesh-hole histogram bin width (pixel squared)"/>
+    </inputs>
+    <outputs>
+        <data name="summary" format="tabular" label="${tool.name} on ${on_string}: summary"/>
+        <data name="histogram" format="tabular" label="${tool.name} on ${on_string}: diameter histogram"/>
+        <data name="histogram_plot" format="png" label="${tool.name} on ${on_string}: diameter histogram plot"/>
+        <data name="mesh_holes" format="tabular" label="${tool.name} on ${on_string}: mesh-hole areas"/>
+        <data name="mesh_plot" format="png" label="${tool.name} on ${on_string}: mesh-hole histogram plot"/>
+        <data name="orientation" format="tabular" label="${tool.name} on ${on_string}: fiber orientation histogram"/>
+        <data name="orientation_plot" format="png" label="${tool.name} on ${on_string}: fiber orientation plot"/>
+        <data name="intersections" format="tabular" label="${tool.name} on ${on_string}: fiber intersections"/>
+        <data name="diagnostic" format="tiff" label="${tool.name} on ${on_string}: intersection correction diagnostic"/>
+        <data name="distance_map" format="tiff" label="${tool.name} on ${on_string}: distance map"/>
+        <data name="skeleton" format="tiff" label="${tool.name} on ${on_string}: fiber centerline"/>
+        <data name="voronoi" format="tiff" label="${tool.name} on ${on_string}: Voronoi centerline"/>
+    </outputs>
+    <tests>
+        <test expect_num_outputs="12">
+            <param name="input" value="blobs.gif"/>
+            <param name="foreground" value="white"/>
+            <output name="summary">
+                <assert_contents>
+                    <has_text text="Mean diameter"/>
+                    <has_n_lines min="8"/>
+                </assert_contents>
+            </output>
+            <output name="histogram">
+                <assert_contents>
+                    <has_text text="Diameter_bin_start"/>
+                    <has_n_lines min="2"/>
+                </assert_contents>
+            </output>
+            <output name="histogram_plot">
+                <assert_contents>
+                    <has_image_height height="500"/>
+                    <has_image_width width="700"/>
+                </assert_contents>
+            </output>
+            <output name="mesh_holes">
+                <assert_contents><has_text text="Mesh_hole"/></assert_contents>
+            </output>
+            <output name="mesh_plot">
+                <assert_contents>
+                    <has_image_height height="500"/>
+                    <has_image_width width="700"/>
+                </assert_contents>
+            </output>
+            <output name="orientation">
+                <assert_contents><has_text text="Angle_bin_start"/></assert_contents>
+            </output>
+            <output name="orientation_plot">
+                <assert_contents>
+                    <has_image_height height="500"/>
+                    <has_image_width width="700"/>
+                </assert_contents>
+            </output>
+            <output name="intersections">
+                <assert_contents><has_text text="Intersection"/></assert_contents>
+            </output>
+            <output name="diagnostic">
+                <assert_contents>
+                    <has_image_height height="144"/>
+                    <has_image_width width="144"/>
+                </assert_contents>
+            </output>
+            <output name="distance_map">
+                <assert_contents>
+                    <has_image_height height="144"/>
+                    <has_image_width width="144"/>
+                </assert_contents>
+            </output>
+            <output name="skeleton">
+                <assert_contents>
+                    <has_image_height height="144"/>
+                    <has_image_width width="144"/>
+                </assert_contents>
+            </output>
+            <output name="voronoi">
+                <assert_contents>
+                    <has_image_height height="144"/>
+                    <has_image_width width="144"/>
+                </assert_contents>
+            </output>
+        </test>
+    </tests>
+    <help><![CDATA[
+**What it does**
+
+DiameterJ measures fiber diameters in a segmented two-dimensional image. This headless implementation
+follows DiameterJ's central diameter-distribution method: it skeletonizes the fiber mask, calculates a
+Euclidean distance map, and samples twice the local distance-to-background along the fiber centerline.
+
+The tool produces diameter statistics and plots, mesh-hole areas, a mesh-hole histogram and porosity,
+a local fiber-orientation distribution and plot, the distance map, and sensitive and Voronoi centerlines.
+The diameter plot shows
+frequency against fiber diameter as a filled black distribution and labels its modal diameter. Mesh holes
+touching an image edge are excluded, matching DiameterJ's particle-analysis convention. Orientation is
+reported from 0 to 180 degrees and estimated from local skeleton neighborhoods.
+
+Fiber intersections are clustered and classified as three- or four-branch junctions. Radius samples near
+these junctions are removed from the diameter distribution. The summary reports fiber area, weighted
+centerline lengths, intersection density, characteristic length, and an iterative super-pixel diameter.
+The diagnostic TIFF shows the sensitive centerline in red, excluded intersection regions in yellow, and
+junction centers in cyan. These headless measurements reproduce the documented DiameterJ workflow but
+may differ numerically from the historical interactive macro and OrientationJ implementation.
+
+Inputs should already be segmented, with fibers represented by one binary color.
+Non-binary inputs are automatically thresholded with ImageJ's Default method.
+
+All measurements are in pixels unless a physical pixel size and unit are supplied. The histogram bin
+width is specified in pixels and is converted using the same pixel size.
+
+DiameterJ is most accurate when fibers are at least 10 pixels wide and less than 10% of the image's
+smallest dimension. Fiber diameters greater than 512 pixels are outside the validated range of the
+original software.
+
+The summary includes a **DiameterJ suitability** status and the percentage of centerline samples inside
+the validated diameter interval. Apply this tool to a Galaxy dataset collection to screen an EM zoom
+series image by image; Galaxy preserves one set of outputs per input image.
+
+**References**
+
+- `NIST DiameterJ <https://www.nist.gov/mml/bbd/biomaterials/diameterj>`_
+- `ImageJ DiameterJ documentation <https://imagej.net/plugins/diameterj>`_
+    ]]></help>
+    <citations>
+        <citation type="doi">10.1016/j.biomaterials.2015.05.015</citation>
+        <citation type="doi">10.1038/nmeth.2102</citation>
+    </citations>
+</tool>
