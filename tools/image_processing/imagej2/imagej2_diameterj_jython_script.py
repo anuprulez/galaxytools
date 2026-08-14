@@ -1,12 +1,13 @@
 import math
 import sys
 
-from ij import IJ, ImagePlus
+from ij import IJ, ImagePlus, Prefs
 from ij.gui import Plot
 from ij.io import FileSaver
 from java.awt import Color, Font
 from java.io import File
 from jarray import array
+from sc.fiji.analyzeSkeleton import AnalyzeSkeleton_
 
 
 def percentile(sorted_values, fraction):
@@ -22,8 +23,9 @@ def percentile(sorted_values, fraction):
 
 
 def write_summary(path, diameters, diameters_pixels, unit, scale, width, height, pore_areas, porosity,
-                  fiber_area, sensitive_length, voronoi_length, intersections, characteristic_length,
-                  super_pixel_diameter, corrected_count):
+                  fiber_area, sensitive_length, voronoi_length, intersection_count, three_points,
+                  four_points, characteristic_length, characteristic_sd, characteristic_max,
+                  super_pixel_diameter, corrected_count, saturated_samples):
     count = len(diameters)
     mean = sum(diameters) / count
     variance = sum([(value - mean) ** 2 for value in diameters]) / count
@@ -36,27 +38,52 @@ def write_summary(path, diameters, diameters_pixels, unit, scale, width, height,
     outf.write("Minimum diameter\t%.6f\t%s\n" % (sorted_values[0], unit))
     outf.write("Median diameter\t%.6f\t%s\n" % (percentile(sorted_values, 0.5), unit))
     outf.write("Maximum diameter\t%.6f\t%s\n" % (sorted_values[-1], unit))
+    frequencies = {}
+    for value in diameters:
+        frequencies[value] = frequencies.get(value, 0) + 1
+    mode = max(frequencies.keys(), key=lambda value: frequencies[value])
+    outf.write("Mode diameter\t%.6f\t%s\n" % (mode, unit))
+    if variance > 0:
+        skewness = sum([(value - mean) ** 3 for value in diameters]) / count / math.pow(variance, 1.5)
+        kurtosis = sum([(value - mean) ** 4 for value in diameters]) / count / (variance * variance) - 3.0
+    else:
+        skewness = 0.0
+        kurtosis = 0.0
+    outf.write("Diameter skewness\t%.6f\tdimensionless\n" % skewness)
+    outf.write("Diameter excess kurtosis\t%.6f\tdimensionless\n" % kurtosis)
+    outf.write("Diameter raw integrated density\t%.6f\t%s\n" % (sum(diameters) / 2.0, unit))
     outf.write("Pixel scale\t%.6f\t%s/pixel\n" % (scale, unit))
     outf.write("Fiber area\t%.6f\t%s^2\n" % (fiber_area * scale * scale, unit))
     outf.write("Sensitive centerline length\t%.6f\t%s\n" % (sensitive_length * scale, unit))
     outf.write("Voronoi centerline length\t%.6f\t%s\n" % (voronoi_length * scale, unit))
     outf.write("Super-pixel diameter\t%.6f\t%s\n" % (super_pixel_diameter * scale, unit))
-    outf.write("Intersections\t%d\tcount\n" % len(intersections))
+    outf.write("Intersections\t%d\tcount\n" % intersection_count)
+    outf.write("Three-point intersections\t%d\tcount\n" % three_points)
+    outf.write("Four-point intersections\t%d\tcount\n" % four_points)
     outf.write("Intersection density\t%.6f\tper 10000 pixels\n" %
-               (len(intersections) * 10000.0 / (width * height)))
+               (intersection_count * 10000.0 / (width * height)))
     outf.write("Characteristic fiber length\t%.6f\t%s\n" % (characteristic_length * scale, unit))
+    outf.write("Characteristic fiber length SD\t%.6f\t%s\n" % (characteristic_sd * scale, unit))
+    outf.write("Maximum branch length\t%.6f\t%s\n" % (characteristic_max * scale, unit))
     outf.write("Intersection-corrected samples\t%d\tcount\n" % corrected_count)
     upper_limit = min(512.0, 0.1 * min(width, height))
     suitable = [value for value in diameters_pixels if value >= 10.0 and value <= upper_limit]
     suitable_fraction = 100.0 * len(suitable) / len(diameters_pixels)
-    status = "PASS" if suitable_fraction == 100.0 else "REVIEW"
+    status = "PASS" if suitable_fraction == 100.0 and saturated_samples == 0 else "REVIEW"
     outf.write("DiameterJ suitability\t%s\tstatus\n" % status)
     outf.write("Validated diameter interval\t10.000000-%.6f\tpixel\n" % upper_limit)
     outf.write("Samples inside validated interval\t%.3f\tpercent\n" % suitable_fraction)
+    outf.write("Saturated EDT samples\t%d\tcount\n" % saturated_samples)
     outf.write("Mesh-hole count\t%d\tcount\n" % len(pore_areas))
     outf.write("Percent porosity\t%.6f\tpercent\n" % porosity)
     if pore_areas:
-        outf.write("Mean mesh-hole area\t%.6f\t%s^2\n" % (sum(pore_areas) / len(pore_areas), unit))
+        pore_mean = sum(pore_areas) / len(pore_areas)
+        pore_variance = sum([(value - pore_mean) ** 2 for value in pore_areas]) / len(pore_areas)
+        outf.write("Total enclosed mesh-hole area\t%.6f\t%s^2\n" % (sum(pore_areas), unit))
+        outf.write("Mean mesh-hole area\t%.6f\t%s^2\n" % (pore_mean, unit))
+        outf.write("Mesh-hole area SD\t%.6f\t%s^2\n" % (math.sqrt(pore_variance), unit))
+        outf.write("Minimum mesh-hole area\t%.6f\t%s^2\n" % (min(pore_areas), unit))
+        outf.write("Maximum mesh-hole area\t%.6f\t%s^2\n" % (max(pore_areas), unit))
     outf.close()
 
 
@@ -78,7 +105,7 @@ def write_histogram(path, bins, bin_width, unit):
     outf.close()
 
 
-def analyze_mesh_holes(binary_pixels, width, height, scale):
+def analyze_mesh_holes(binary_pixels, width, height, scale, minimum_area):
     visited = set()
     areas = []
     background_count = 0
@@ -100,27 +127,13 @@ def analyze_mesh_holes(binary_pixels, width, height, scale):
             y = index // width
             if x == 0 or y == 0 or x == width - 1 or y == height - 1:
                 touches_edge = True
-            if x > 0:
-                neighbor = index - 1
-                if neighbor not in visited and (binary_pixels[neighbor] & 0xff) == 0:
-                    visited.add(neighbor)
-                    stack.append(neighbor)
-            if x < width - 1:
-                neighbor = index + 1
-                if neighbor not in visited and (binary_pixels[neighbor] & 0xff) == 0:
-                    visited.add(neighbor)
-                    stack.append(neighbor)
-            if y > 0:
-                neighbor = index - width
-                if neighbor not in visited and (binary_pixels[neighbor] & 0xff) == 0:
-                    visited.add(neighbor)
-                    stack.append(neighbor)
-            if y < height - 1:
-                neighbor = index + width
-                if neighbor not in visited and (binary_pixels[neighbor] & 0xff) == 0:
-                    visited.add(neighbor)
-                    stack.append(neighbor)
-        if not touches_edge:
+            for yy in range(max(0, y - 1), min(height, y + 2)):
+                for xx in range(max(0, x - 1), min(width, x + 2)):
+                    neighbor = yy * width + xx
+                    if neighbor not in visited and (binary_pixels[neighbor] & 0xff) == 0:
+                        visited.add(neighbor)
+                        stack.append(neighbor)
+        if not touches_edge and area >= minimum_area:
             areas.append(area * scale * scale)
     return areas, 100.0 * background_count / size
 
@@ -168,26 +181,27 @@ def neighbor_count(pixels, width, height, index):
     return count
 
 
-def weighted_length(pixels, width, height):
-    length = 0.0
-    for index in range(width * height):
-        if (pixels[index] & 0xff) == 0:
-            continue
-        x = index % width
-        y = index // width
-        if x + 1 < width and (pixels[index + 1] & 0xff) != 0:
-            length += 1.0
-        if y + 1 < height and (pixels[index + width] & 0xff) != 0:
-            length += 1.0
-        if (x + 1 < width and y + 1 < height and
-                (pixels[index + width + 1] & 0xff) != 0 and
-                (pixels[index + 1] & 0xff) == 0 and (pixels[index + width] & 0xff) == 0):
-            length += math.sqrt(2.0)
-        if (x > 0 and y + 1 < height and
-                (pixels[index + width - 1] & 0xff) != 0 and
-                (pixels[index - 1] & 0xff) == 0 and (pixels[index + width] & 0xff) == 0):
-            length += math.sqrt(2.0)
-    return length
+def centerline_pixel_count(pixels):
+    return sum([1 for value in pixels if (value & 0xff) != 0])
+
+
+def analyze_skeleton_metrics(skeleton):
+    analyzer = AnalyzeSkeleton_()
+    working = skeleton.duplicate()
+    analyzer.setup("", working)
+    result = analyzer.run(analyzer.SHORTEST_BRANCH, False, False, working, True, True)
+    junctions = sum([int(value) for value in result.getJunctions()])
+    quadruples = sum([int(value) for value in result.getQuadruples()])
+    three_points = max(0, junctions - quadruples)
+    branch_lengths = []
+    for graph in result.getGraph():
+        for edge in graph.getEdges():
+            branch_lengths.append(float(edge.getLength()))
+    if branch_lengths:
+        mean = sum(branch_lengths) / len(branch_lengths)
+        variance = sum([(value - mean) ** 2 for value in branch_lengths]) / len(branch_lengths)
+        return junctions, three_points, quadruples, mean, math.sqrt(variance), max(branch_lengths)
+    return junctions, three_points, quadruples, 0.0, 0.0, 0.0
 
 
 def find_intersections(pixels, distance_pixels, distance_is_byte, width, height):
@@ -235,7 +249,7 @@ def find_intersections(pixels, distance_pixels, distance_is_byte, width, height)
 
 def write_intersections(path, intersections, scale, unit):
     outf = open(path, "wb")
-    outf.write("Intersection\tX\tY\tBranches\tLocal_radius\tUnit\n")
+    outf.write("Intersection\tX\tY\tEstimated_branches\tLocal_radius\tUnit\n")
     for index, item in enumerate(intersections):
         outf.write("%d\t%.3f\t%.3f\t%d\t%.6f\t%s\n" %
                    (index + 1, item["x"], item["y"], item["arms"], item["radius"] * scale, unit))
@@ -245,7 +259,7 @@ def write_intersections(path, intersections, scale, unit):
 def correct_intersections(skeleton_pixels, distance_pixels, distance_is_byte, width, height, intersections):
     junctions = []
     for item in intersections:
-        junctions.append((item["x"], item["y"], max(1.0, item["radius"])))
+        junctions.append((item["x"], item["y"], max(1.0, item["radius"] / math.sqrt(2.0))))
     corrected = []
     excluded = set()
     for index in range(width * height):
@@ -389,14 +403,15 @@ def save_tiff(image, path, description):
 
 
 # Fiji's Jython is Python 2, so positional arguments are used instead of argparse.
-input_path = sys.argv[-20]
-foreground = sys.argv[-19]
-scale = float(sys.argv[-18])
-unit = sys.argv[-17]
-bin_width_pixels = float(sys.argv[-16])
-orientation_bin_width = float(sys.argv[-15])
-orientation_radius = int(sys.argv[-14])
-mesh_bin_width_pixels = float(sys.argv[-13])
+input_path = sys.argv[-21]
+foreground = sys.argv[-20]
+scale = float(sys.argv[-19])
+unit = sys.argv[-18]
+bin_width_pixels = float(sys.argv[-17])
+orientation_bin_width = float(sys.argv[-16])
+orientation_radius = int(sys.argv[-15])
+mesh_bin_width_pixels = float(sys.argv[-14])
+minimum_mesh_area = int(sys.argv[-13])
 summary_path = sys.argv[-12]
 histogram_path = sys.argv[-11]
 histogram_plot_path = sys.argv[-10]
@@ -417,12 +432,15 @@ if image is None:
 binary = image.duplicate()
 IJ.run(binary, "8-bit", "")
 processor = binary.getProcessor()
-if not processor.isBinary():
-    IJ.setAutoThreshold(binary, "Default dark")
+input_is_binary = processor.isBinary()
+if not input_is_binary:
+    threshold_method = "Default dark" if foreground == "white" else "Default"
+    IJ.setAutoThreshold(binary, threshold_method)
+    Prefs.blackBackground = True
     IJ.run(binary, "Convert to Mask", "")
 
 # DiameterJ expects white fibers on a black background.
-if foreground == "black":
+if input_is_binary and foreground == "black":
     binary.getProcessor().invert()
 
 # Use the ImageJ command rather than EDM.makeFloatEDM/makeFloat.  The public
@@ -443,6 +461,11 @@ voronoi.getProcessor().invert()
 IJ.run(voronoi, "Voronoi", "")
 if not voronoi.getProcessor().isBinary():
     IJ.run(voronoi, "Make Binary", "")
+# Make Binary follows a global ImageJ background preference. Voronoi lines
+# are the minority class, so normalize them to white deterministically.
+voronoi_raw_pixels = voronoi.getProcessor().getPixels()
+if centerline_pixel_count(voronoi_raw_pixels) > voronoi.getWidth() * voronoi.getHeight() / 2:
+    voronoi.getProcessor().invert()
 IJ.run(voronoi, "Skeletonize", "")
 save_tiff(voronoi, voronoi_path, "Voronoi centerline")
 
@@ -451,12 +474,15 @@ binary_pixels = binary.getProcessor().getPixels()
 distance_pixels = distance_processor.getPixels()
 diameters = []
 diameters_pixels = []
+saturated_samples = 0
 for index in range(len(skeleton_pixels)):
     distance = distance_pixels[index]
     # Jython exposes ImageJ byte pixels as signed Java bytes.
     if distance_image.getBitDepth() == 8:
         distance = distance & 0xff
     if (skeleton_pixels[index] & 0xff) != 0 and distance > 0:
+        if distance_image.getBitDepth() == 8 and distance == 255:
+            saturated_samples += 1
         diameters_pixels.append(2.0 * float(distance))
         diameters.append(2.0 * float(distance) * scale)
 
@@ -477,24 +503,30 @@ write_intersections(intersections_path, intersections, scale, unit)
 write_diagnostic(diagnostic_path, binary, skeleton_pixels, excluded, intersections, width, height)
 
 fiber_area = sum([1 for value in binary_pixels if (value & 0xff) != 0])
-sensitive_length = weighted_length(skeleton_pixels, width, height)
+sensitive_length = centerline_pixel_count(skeleton_pixels)
 voronoi_pixels = voronoi.getProcessor().getPixels()
-voronoi_length = weighted_length(voronoi_pixels, width, height)
-average_length = (sensitive_length + voronoi_length) / 2.0
-super_pixel_diameter = fiber_area / average_length if average_length > 0 else 0.0
+voronoi_length = centerline_pixel_count(voronoi_pixels)
+(intersection_count, three_points, four_points, characteristic_length,
+ characteristic_sd, characteristic_max) = analyze_skeleton_metrics(skeleton)
+super_pixel_diameter = fiber_area / sensitive_length if sensitive_length > 0 else 0.0
 for iteration in range(100):
-    correction = 0.0
-    for item in intersections:
-        correction += 0.5 * super_pixel_diameter if item["arms"] <= 3 else super_pixel_diameter
-    corrected_length = max(1.0, average_length - correction)
-    updated = fiber_area / corrected_length
+    medial_corrected = sensitive_length - three_points * 0.5 * super_pixel_diameter - four_points * super_pixel_diameter
+    if medial_corrected <= 0:
+        break
+    updated = fiber_area / medial_corrected
     if abs(updated - super_pixel_diameter) < 0.001:
         super_pixel_diameter = updated
         break
     super_pixel_diameter = updated
-characteristic_length = sensitive_length / len(intersections) if intersections else sensitive_length
+medial_corrected = max(1.0, sensitive_length - three_points * 0.5 * super_pixel_diameter -
+                       four_points * super_pixel_diameter)
+voronoi_corrected = max(1.0, voronoi_length - three_points * 0.5 * super_pixel_diameter -
+                        four_points * super_pixel_diameter)
+medial_diameter = fiber_area / medial_corrected
+voronoi_diameter = fiber_area / voronoi_corrected
+super_pixel_diameter = (medial_diameter + voronoi_diameter) / 2.0
 
-pore_areas, porosity = analyze_mesh_holes(binary_pixels, width, height, scale)
+pore_areas, porosity = analyze_mesh_holes(binary_pixels, width, height, scale, minimum_mesh_area)
 write_mesh_holes(mesh_holes_path, pore_areas, unit)
 write_mesh_hole_plot(mesh_plot_path, pore_areas, mesh_bin_width_pixels * scale * scale, unit)
 
@@ -504,8 +536,9 @@ write_orientation(orientation_path, orientation_bins, orientation_bin_width)
 write_orientation_plot(orientation_plot_path, orientation_bins, orientation_bin_width)
 
 write_summary(summary_path, diameters, diameters_pixels, unit, scale, width, height, pore_areas, porosity,
-              fiber_area, sensitive_length, voronoi_length, intersections, characteristic_length,
-              super_pixel_diameter, len(diameters_pixels))
+              fiber_area, sensitive_length, voronoi_length, intersection_count, three_points, four_points,
+              characteristic_length, characteristic_sd, characteristic_max, super_pixel_diameter,
+              len(diameters_pixels), saturated_samples)
 bin_width = bin_width_pixels * scale
 bins = make_histogram(diameters, bin_width)
 write_histogram(histogram_path, bins, bin_width, unit)
