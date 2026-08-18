@@ -1,0 +1,86 @@
+<tool id="sem_fibar" name="FiBar SEM diameter estimation" version="0.1.0+galaxy2" profile="23.1">
+    <description>in scanning electron microscopy images</description>
+    <requirements>
+        <container type="docker">sem-fibar:0.1.0</container>
+    </requirements>
+    <command detect_errors="aggressive"><![CDATA[
+python '$__tool_directory__/sem_predict.py'
+    --input '$input'
+    --resnet-model '$resnet_model'
+    --vgg-model '$vgg_model'
+    --backend '$backend'
+    --magnification '$magnification'
+    --measurements '$measurements'
+    --seed '$seed'
+    --table '$diameters'
+    --image '$annotated'
+    --segmented-image '$segmented'
+    --histogram '$histogram'
+    ]]></command>
+    <inputs>
+        <param name="input" type="data" format="tiff" label="SEM image" help="Input scanning electron microscopy image in TIFF format." />
+        <param name="resnet_model" type="data" format="binary" label="ResNet digit-recognition model (.pth)" />
+        <param name="vgg_model" type="data" format="h5" label="VGG digit-recognition model (.h5)" />
+        <param name="backend" type="select" label="Digit-recognition model" help="Used to recognize the numeric scale label in the image.">
+            <option value="resnet" selected="true">PyTorch ResNet (.pth)</option>
+            <option value="vgg">Keras tiny VGG (.h5)</option>
+        </param>
+        <param name="magnification" type="select" label="Image magnification" help="FiBar uses Otsu segmentation for 2k and 5k images and Huang/Kuwahara segmentation otherwise.">
+            <option value="other" selected="true">Other (for example 10k, 15k, or 20k)</option>
+            <option value="2k">2k</option>
+            <option value="5k">5k</option>
+        </param>
+        <param name="measurements" type="integer" min="1" value="100" label="Number of diameter sampling points" />
+        <param name="seed" type="integer" value="0" label="Random seed" help="Fixes FiBar's random point selection for reproducible results." />
+    </inputs>
+    <outputs>
+        <data name="diameters" format="tabular" label="FiBar diameters on ${on_string}" />
+        <data name="annotated" format="tiff" label="FiBar annotated image on ${on_string}" />
+        <data name="segmented" format="tiff" label="FiBar segmented image on ${on_string}" />
+        <data name="histogram" format="png" label="FiBar diameter histogram on ${on_string}" />
+    </outputs>
+    <tests>
+        <test expect_num_outputs="4">
+            <param name="input" location="https://raw.githubusercontent.com/anuprulez/fibar/main/scripts/examples/sem/10k_example.tif" />
+            <param name="resnet_model" location="https://raw.githubusercontent.com/anuprulez/fibar/main/scripts/fibar_module/resnet_pytorch.pth" />
+            <param name="vgg_model" location="https://raw.githubusercontent.com/anuprulez/fibar/main/scripts/fibar_module/digit-recognizer-tinier-vgg.h5" />
+            <param name="backend" value="resnet" />
+            <param name="magnification" value="other" />
+            <param name="measurements" value="3" />
+            <param name="seed" value="1" />
+            <output name="diameters">
+                <assert_contents>
+                    <has_text text="measurement" />
+                    <has_text text="diameter" />
+                </assert_contents>
+            </output>
+            <output name="annotated" ftype="tiff">
+                <assert_contents>
+                    <has_size min="10000" />
+                </assert_contents>
+            </output>
+            <output name="segmented" ftype="tiff">
+                <assert_contents>
+                    <has_size min="1000" />
+                </assert_contents>
+            </output>
+            <output name="histogram" ftype="png">
+                <assert_contents>
+                    <has_size min="1000" />
+                </assert_contents>
+            </output>
+        </test>
+    </tests>
+    <help><![CDATA[
+**What it does**
+
+FiBar estimates fibre diameters from a TIFF scanning electron microscopy image. It segments fibres, samples points, measures the local distance to the skeleton, and writes a tabular result, an annotated TIFF, the binary segmented TIFF, and a diameter-frequency histogram.
+
+The uploaded digit model reads the numeric scale label. The unit text is read with Tesseract. If the complete scale cannot be recognized, diameters are reported in pixels; otherwise they are reported in nanometres.
+
+Both upstream model files are accepted. Choose which one performs digit prediction with **Digit-recognition model**. The default ResNet backend matches the current upstream implementation.
+    ]]></help>
+    <citations>
+        <citation type="bibtex">@misc{fibar, title={FiBar: diameter measuring tool}, author={Moor, Marilin and contributors}, url={https://github.com/anuprulez/fibar}}</citation>
+    </citations>
+</tool>
