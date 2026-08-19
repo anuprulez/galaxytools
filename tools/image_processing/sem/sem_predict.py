@@ -57,6 +57,8 @@ def main():
         elif scales[1] == "nm":
             units_per_pixel = float(scales[0]) / float(scales[2])
             unit = "nm"
+        else:
+            units_per_pixel = 1
 
     if args.magnification in ("2k", "5k"):
         segmented = cv2.threshold(
